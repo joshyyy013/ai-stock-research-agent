@@ -340,6 +340,31 @@ if "quote" in st.session_state:
     if st.session_state.get("ai_summary"):
         st.write(st.session_state.ai_summary)
 
+    report_text = f"""
+    # {ticker} Stock Research Report
+
+    ## Company
+    {profile.get('name', 'N/A')}
+
+    ## Industry
+    {profile.get('finnhubIndustry', 'N/A')}
+
+    ## Price
+    Current Price: ${quote.get('c', 'N/A')}
+    Daily Change: {quote.get('d', 'N/A')}
+    Daily % Change: {quote.get('dp', 'N/A')}%
+
+    ## AI Research Summary
+    {st.session_state.ai_summary}
+    """
+
+    st.download_button(
+        label="Download Research Report",
+        data=report_text,
+        file_name=f"{ticker}_research_report.txt",
+        mime="text/plain"
+    )
+
 
 # ---------- WATCHLIST ----------
 
