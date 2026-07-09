@@ -30,3 +30,27 @@ Run the application
 ```bash
 streamlit run app.py
 ```
+
+## Features
+- Stock quote lookup
+- Company profile lookup
+- Recent news display
+- AI stock research summary
+- Earnings calendar analysis
+- Watchlist risk summary
+- Downloadable research reports
+
+## Tech Stack
+- Python
+- Streamlit
+- Finnhub API
+- Groq API
+- Llama 3.1
+- dotenv
+
+## Project Structure
+- `app.py` - Streamlit interface
+- `api/` - Finnhub API functions
+- `ai/` - LLM summary generation
+- `reports/` - downloadable report builder
+- `utils/` - helper functions

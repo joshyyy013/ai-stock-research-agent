@@ -1,11 +1,24 @@
 import os
 from pathlib import Path
-from datetime import datetime, timedelta
 
-import requests
 import streamlit as st
 from dotenv import load_dotenv
-from groq import Groq
+
+from api.finnhub_client import (
+    get_quote,
+    get_company_profile,
+    get_company_news,
+    get_earnings_calendar,
+)
+from api.sec_client import get_latest_filings
+from ai.groq_client import (
+    get_groq_client,
+    generate_ai_summary,
+    generate_earnings_summary,
+    generate_watchlist_summary,
+)
+from reports.report_builder import build_research_report
+from utils.helpers import parse_watchlist, format_price, format_percent
 
 
 # ---------- SETUP ----------
@@ -15,14 +28,16 @@ load_dotenv(dotenv_path=env_path)
 
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-BASE_URL = "https://finnhub.io/api/v1"
 
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+groq_client = get_groq_client(GROQ_API_KEY)
 
 st.set_page_config(page_title="AI Stock Research Agent", layout="wide")
 
 st.title("AI Stock Research Agent")
-st.write("Research stocks using market data, company news, earnings events, watchlists, and AI summaries.")
+st.write(
+    "Research stocks using market data, company news, earnings events, "
+    "SEC filings, watchlists, and AI summaries."
+)
 
 
 # ---------- SIDEBAR ----------
@@ -32,220 +47,10 @@ ticker = st.sidebar.text_input("Stock ticker", value="MU").upper()
 st.sidebar.header("Watchlist")
 watchlist_input = st.sidebar.text_input(
     "Enter tickers separated by commas",
-    value="NVDA, AMD, MU, META, IVV, VEU"
+    value="NVDA, AMD, MU, META, IVV, VEU",
 )
 
-watchlist = [
-    symbol.strip().upper()
-    for symbol in watchlist_input.split(",")
-    if symbol.strip()
-]
-
-
-# ---------- API FUNCTIONS ----------
-
-def get_quote(symbol):
-    response = requests.get(
-        f"{BASE_URL}/quote",
-        params={"symbol": symbol, "token": FINNHUB_API_KEY},
-    )
-    return response.json()
-
-
-def get_company_profile(symbol):
-    response = requests.get(
-        f"{BASE_URL}/stock/profile2",
-        params={"symbol": symbol, "token": FINNHUB_API_KEY},
-    )
-    return response.json()
-
-
-def get_company_news(symbol):
-    today = datetime.today().date()
-    week_ago = today - timedelta(days=7)
-
-    response = requests.get(
-        f"{BASE_URL}/company-news",
-        params={
-            "symbol": symbol,
-            "from": week_ago,
-            "to": today,
-            "token": FINNHUB_API_KEY,
-        },
-    )
-    return response.json()
-
-
-def get_earnings_calendar(symbol):
-    today = datetime.today().date()
-    three_months_later = today + timedelta(days=90)
-
-    response = requests.get(
-        f"{BASE_URL}/calendar/earnings",
-        params={
-            "symbol": symbol,
-            "from": today,
-            "to": three_months_later,
-            "token": FINNHUB_API_KEY,
-        },
-    )
-
-    data = response.json()
-    return data.get("earningsCalendar", [])
-
-
-# ---------- AI FUNCTIONS ----------
-
-def generate_ai_summary(ticker, profile, quote, news):
-    profile_text = f"""
-Company: {profile.get("name", "N/A")}
-Industry: {profile.get("finnhubIndustry", "N/A")}
-Country: {profile.get("country", "N/A")}
-Exchange: {profile.get("exchange", "N/A")}
-Market Cap: {profile.get("marketCapitalization", "N/A")} million
-"""
-
-    quote_text = f"""
-Current Price: {quote.get("c", "N/A")}
-Daily Change: {quote.get("d", "N/A")}
-Daily Percent Change: {quote.get("dp", "N/A")}%
-Previous Close: {quote.get("pc", "N/A")}
-Open Price: {quote.get("o", "N/A")}
-High Price: {quote.get("h", "N/A")}
-Low Price: {quote.get("l", "N/A")}
-"""
-
-    news_text = ""
-
-    for article in news[:5]:
-        news_text += f"""
-Headline: {article.get("headline", "N/A")}
-Summary: {article.get("summary", "N/A")}
-Source: {article.get("source", "N/A")}
-"""
-
-    prompt = f"""
-You are an AI stock research assistant.
-
-Analyse {ticker} using the information below.
-
-Company:
-{profile_text}
-
-Quote:
-{quote_text}
-
-Recent news:
-{news_text}
-
-Return the answer in this format:
-
-1. What changed recently?
-2. Why the stock may be moving
-3. Bull case
-4. Bear case
-5. Key risks
-6. What to research next
-
-Rules:
-- Do not give direct financial advice.
-- Do not say buy, sell, or hold.
-- Keep it clear and beginner-friendly.
-- Mention when information is limited.
-"""
-
-    response = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[
-            {"role": "system", "content": "You explain stock research clearly and carefully."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.3,
-    )
-
-    return response.choices[0].message.content
-
-
-def generate_earnings_summary(ticker, earnings):
-    earnings_text = ""
-
-    for event in earnings[:3]:
-        earnings_text += f"""
-Date: {event.get("date", "N/A")}
-EPS Estimate: {event.get("epsEstimate", "N/A")}
-Revenue Estimate: {event.get("revenueEstimate", "N/A")}
-Quarter: {event.get("quarter", "N/A")}
-Year: {event.get("year", "N/A")}
-"""
-
-    prompt = f"""
-You are an AI stock research assistant.
-
-Analyse the upcoming earnings information for {ticker}:
-
-{earnings_text}
-
-Explain:
-1. When the next earnings event is
-2. Why earnings can affect the stock price
-3. What investors should watch before earnings
-4. What would count as a positive or negative surprise
-
-Do not give buy, sell, or hold advice.
-Keep it beginner-friendly.
-"""
-
-    response = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[
-            {"role": "system", "content": "You explain earnings events clearly."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.3,
-    )
-
-    return response.choices[0].message.content
-
-
-def generate_watchlist_summary(watchlist_data):
-    watchlist_text = ""
-
-    for stock in watchlist_data:
-        watchlist_text += f"""
-Ticker: {stock["ticker"]}
-Company: {stock["name"]}
-Industry: {stock["industry"]}
-Price: {stock["price"]}
-Daily Change %: {stock["change_percent"]}
-"""
-
-    prompt = f"""
-You are an AI portfolio research assistant.
-
-Analyse this watchlist:
-
-{watchlist_text}
-
-Explain:
-1. Main sector exposures
-2. Concentration risks
-3. Stocks that may move together
-4. What the investor should monitor next
-
-Do not give buy, sell, or hold advice.
-Keep it beginner-friendly.
-"""
-
-    response = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[
-            {"role": "system", "content": "You explain portfolio risk clearly."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.3,
-    )
-
-    return response.choices[0].message.content
+watchlist = parse_watchlist(watchlist_input)
 
 
 # ---------- SINGLE STOCK RESEARCH ----------
@@ -258,10 +63,11 @@ if st.button("Research Stock"):
     else:
         with st.spinner("Fetching stock data..."):
             st.session_state.ticker = ticker
-            st.session_state.quote = get_quote(ticker)
-            st.session_state.profile = get_company_profile(ticker)
-            st.session_state.news = get_company_news(ticker)
-            st.session_state.earnings = get_earnings_calendar(ticker)
+            st.session_state.quote = get_quote(ticker, FINNHUB_API_KEY)
+            st.session_state.profile = get_company_profile(ticker, FINNHUB_API_KEY)
+            st.session_state.news = get_company_news(ticker, FINNHUB_API_KEY)
+            st.session_state.earnings = get_earnings_calendar(ticker, FINNHUB_API_KEY)
+            st.session_state.sec_filings = get_latest_filings(ticker)
 
             st.session_state.ai_summary = None
             st.session_state.earnings_summary = None
@@ -273,15 +79,16 @@ if "quote" in st.session_state:
     profile = st.session_state.profile
     news = st.session_state.news
     earnings = st.session_state.earnings
+    sec_filings = st.session_state.sec_filings
 
     st.subheader(f"{ticker} Overview")
 
     col1, col2, col3, col4 = st.columns(4)
 
-    col1.metric("Current Price", f"${quote.get('c', 'N/A')}")
-    col2.metric("Previous Close", f"${quote.get('pc', 'N/A')}")
-    col3.metric("Daily Change", f"{quote.get('d', 'N/A')}")
-    col4.metric("Daily % Change", f"{quote.get('dp', 'N/A')}%")
+    col1.metric("Current Price", format_price(quote.get("c")))
+    col2.metric("Previous Close", format_price(quote.get("pc")))
+    col3.metric("Daily Change", format_price(quote.get("d")))
+    col4.metric("Daily % Change", format_percent(quote.get("dp")))
 
     st.subheader("Company Profile")
 
@@ -309,10 +116,32 @@ if "quote" in st.session_state:
             st.warning("No earnings data available to summarise.")
         else:
             with st.spinner("Analysing earnings event..."):
-                st.session_state.earnings_summary = generate_earnings_summary(ticker, earnings)
+                st.session_state.earnings_summary = generate_earnings_summary(
+                    groq_client, ticker, earnings
+                )
 
     if st.session_state.get("earnings_summary"):
         st.write(st.session_state.earnings_summary)
+
+    st.subheader("Latest SEC Filings")
+
+    if sec_filings:
+        for filing in sec_filings:
+            st.write(f"**{filing['form']}** - {filing['filing_date']}")
+
+            accession_no_dashes = filing["accession_number"].replace("-", "")
+            cik = filing["cik"].lstrip("0")
+
+            filing_url = (
+                f"https://www.sec.gov/Archives/edgar/data/"
+                f"{cik}/{accession_no_dashes}/{filing['primary_document']}"
+            )
+
+            st.link_button("📄 Open SEC Filing", filing_url)
+
+            st.divider()
+    else:
+        st.write("No SEC filings found.")
 
     st.subheader("Recent News")
 
@@ -335,35 +164,26 @@ if "quote" in st.session_state:
             st.error("Groq API key missing. Add GROQ_API_KEY to your .env file.")
         else:
             with st.spinner("Generating AI summary..."):
-                st.session_state.ai_summary = generate_ai_summary(ticker, profile, quote, news)
+                st.session_state.ai_summary = generate_ai_summary(
+                    groq_client, ticker, profile, quote, news
+                )
 
     if st.session_state.get("ai_summary"):
         st.write(st.session_state.ai_summary)
 
-    report_text = f"""
-    # {ticker} Stock Research Report
+        report_text = build_research_report(
+            ticker,
+            profile,
+            quote,
+            st.session_state.ai_summary,
+        )
 
-    ## Company
-    {profile.get('name', 'N/A')}
-
-    ## Industry
-    {profile.get('finnhubIndustry', 'N/A')}
-
-    ## Price
-    Current Price: ${quote.get('c', 'N/A')}
-    Daily Change: {quote.get('d', 'N/A')}
-    Daily % Change: {quote.get('dp', 'N/A')}%
-
-    ## AI Research Summary
-    {st.session_state.ai_summary}
-    """
-
-    st.download_button(
-        label="Download Research Report",
-        data=report_text,
-        file_name=f"{ticker}_research_report.txt",
-        mime="text/plain"
-    )
+        st.download_button(
+            label="Download Research Report",
+            data=report_text,
+            file_name=f"{ticker}_research_report.txt",
+            mime="text/plain",
+        )
 
 
 # ---------- WATCHLIST ----------
@@ -378,8 +198,8 @@ if st.button("Load Watchlist"):
 
         with st.spinner("Loading watchlist..."):
             for symbol in watchlist:
-                quote_data = get_quote(symbol)
-                profile_data = get_company_profile(symbol)
+                quote_data = get_quote(symbol, FINNHUB_API_KEY)
+                profile_data = get_company_profile(symbol, FINNHUB_API_KEY)
 
                 stock_info = {
                     "ticker": symbol,
@@ -414,7 +234,8 @@ if "watchlist_data" in st.session_state:
         else:
             with st.spinner("Analysing watchlist..."):
                 st.session_state.watchlist_summary = generate_watchlist_summary(
-                    st.session_state.watchlist_data
+                    groq_client,
+                    st.session_state.watchlist_data,
                 )
 
     if st.session_state.get("watchlist_summary"):
