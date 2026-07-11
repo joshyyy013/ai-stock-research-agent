@@ -126,3 +126,50 @@ Do not give buy, sell, or hold advice.
     )
 
     return response.choices[0].message.content
+
+def generate_filing_summary(client, ticker, filing, filing_text):
+    limited_text = filing_text[:8000]
+
+    prompt = f"""
+You are an AI financial filing research assistant.
+
+Analyse this SEC {filing.get("form", "filing")} for {ticker}.
+
+Filing date:
+{filing.get("filing_date", "N/A")}
+
+Filing text:
+{limited_text}
+
+Return the answer in this format:
+
+1. Executive summary
+2. Revenue and profitability changes
+3. Management outlook
+4. Main business risks
+5. Capital expenditure and investment
+6. Important changes investors should investigate
+
+Rules:
+- Use only information present in the filing.
+- Clearly state when information is unavailable.
+- Do not give buy, sell, or hold advice.
+- Keep the explanation understandable to a non-expert investor.
+"""
+
+    response = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[
+            {
+                "role": "system",
+                "content": "You summarise SEC filings accurately and cautiously.",
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+        temperature=0.2,
+    )
+
+    return response.choices[0].message.content

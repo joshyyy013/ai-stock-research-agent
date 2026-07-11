@@ -10,12 +10,17 @@ from api.finnhub_client import (
     get_company_news,
     get_earnings_calendar,
 )
-from api.sec_client import get_latest_filings
+from api.sec_client import (
+    get_latest_filings,
+    build_filing_url,
+    get_filing_text,
+)
 from ai.groq_client import (
     get_groq_client,
     generate_ai_summary,
     generate_earnings_summary,
     generate_watchlist_summary,
+    generate_filing_summary,
 )
 from reports.report_builder import build_research_report
 from utils.helpers import parse_watchlist, format_price, format_percent
@@ -126,33 +131,49 @@ if "quote" in st.session_state:
     st.subheader("Latest SEC Filings")
 
     if sec_filings:
-        for filing in sec_filings:
+        for index, filing in enumerate(sec_filings):
             st.write(f"**{filing['form']}** - {filing['filing_date']}")
 
-            accession_no_dashes = filing["accession_number"].replace("-", "")
-            cik = filing["cik"].lstrip("0")
-
-            filing_url = (
-                f"https://www.sec.gov/Archives/edgar/data/"
-                f"{cik}/{accession_no_dashes}/{filing['primary_document']}"
+            filing_url = build_filing_url(filing)
+            st.link_button(
+                "Open SEC Filing",
+                filing_url,
+                key=f"open_filing_{index}",
             )
 
-            st.link_button("📄 Open SEC Filing", filing_url)
+            if st.button(
+                f"Generate AI Summary for {filing['form']} dated {filing['filing_date']}",
+                key=f"summarise_filing_{index}",
+            ):
+                if not GROQ_API_KEY:
+                    st.error("Groq API key missing.")
+                else:
+                    try:
+                        with st.spinner("Reading and analysing filing..."):
+                            filing_text = get_filing_text(filing)
+
+                            summary = generate_filing_summary(
+                                groq_client,
+                                ticker,
+                                filing,
+                                filing_text,
+                            )
+
+                            st.session_state[
+                                f"filing_summary_{index}"
+                            ] = summary
+
+                    except Exception as error:
+                        st.error(f"Could not analyse filing: {error}")
+
+            summary_key = f"filing_summary_{index}"
+
+            if st.session_state.get(summary_key):
+                st.write(st.session_state[summary_key])
 
             st.divider()
     else:
         st.write("No SEC filings found.")
-
-    st.subheader("Recent News")
-
-    if news:
-        for article in news[:5]:
-            st.write(f"### {article.get('headline', 'No headline')}")
-            st.write(article.get("summary", "No summary available."))
-            st.write(article.get("url", "No URL available."))
-            st.divider()
-    else:
-        st.write("No recent news found.")
 
     st.sidebar.subheader("AI Usage Info")
     st.sidebar.metric("News Articles Analysed", len(news[:5]))

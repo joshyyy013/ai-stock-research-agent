@@ -1,8 +1,39 @@
 import requests
 
+from bs4 import BeautifulSoup
+
 HEADERS = {
     "User-Agent": "Joshua Kumar ai-stock-research-agent contact@example.com"
 }
+
+def build_filing_url(filing):
+    accession_no_dashes = filing["accession_number"].replace("-", "")
+    cik = filing["cik"].lstrip("0")
+
+    return (
+        "https://www.sec.gov/Archives/edgar/data/"
+        f"{cik}/{accession_no_dashes}/{filing['primary_document']}"
+    )
+
+
+def get_filing_text(filing):
+    filing_url = build_filing_url(filing)
+
+    response = requests.get(
+        filing_url,
+        headers=HEADERS,
+        timeout=30,
+    )
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    for element in soup(["script", "style", "table"]):
+        element.decompose()
+
+    text = soup.get_text(separator=" ", strip=True)
+
+    return text
 
 
 def get_company_cik(ticker):
@@ -41,6 +72,6 @@ def get_latest_filings(ticker):
                 "accession_number": filings["accessionNumber"][i],
                 "primary_document": filings["primaryDocument"][i],
                 "cik": cik,
-            })
+})
 
     return results[:5]
