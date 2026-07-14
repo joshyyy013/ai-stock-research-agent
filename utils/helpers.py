@@ -1,3 +1,5 @@
+import re
+
 def parse_watchlist(text):
     """
     Convert comma-separated ticker text into a clean list.
@@ -31,3 +33,11 @@ def format_percent(value):
         return f"{float(value):.2f}%"
     except (TypeError, ValueError):
         return "N/A"
+
+def validate_ticker(ticker):
+    return bool(
+        re.fullmatch(
+            r"[A-Z0-9.\-]{1,10}",
+            ticker.strip().upper(),
+        )
+    )

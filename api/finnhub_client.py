@@ -5,11 +5,13 @@ BASE_URL = "https://finnhub.io/api/v1"
 
 
 def get_quote(symbol, api_key):
-    response = requests.get(
+    return make_request(
         f"{BASE_URL}/quote",
-        params={"symbol": symbol, "token": api_key},
+        {
+            "symbol": symbol,
+            "token": api_key,
+        },
     )
-    return response.json()
 
 
 def get_company_profile(symbol, api_key):
@@ -52,3 +54,26 @@ def get_earnings_calendar(symbol, api_key):
 
     data = response.json()
     return data.get("earningsCalendar", [])
+
+def make_request(url, params):
+    try:
+        response = requests.get(
+            url,
+            params=params,
+            timeout=15,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    except requests.exceptions.Timeout:
+        raise RuntimeError("The request timed out. Please try again.")
+
+    except requests.exceptions.HTTPError as error:
+        raise RuntimeError(
+            f"The data provider returned an error: {error}"
+        )
+
+    except requests.exceptions.RequestException as error:
+        raise RuntimeError(
+            f"Could not connect to the data provider: {error}"
+        )

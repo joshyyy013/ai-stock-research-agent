@@ -128,7 +128,7 @@ Do not give buy, sell, or hold advice.
     return response.choices[0].message.content
 
 def generate_filing_summary(client, ticker, filing, filing_text):
-    limited_text = filing_text[:8000]
+    limited_text = filing_text[:7000]
 
     prompt = f"""
 You are an AI financial filing research assistant.
